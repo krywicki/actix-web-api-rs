@@ -2,6 +2,7 @@ use std::{
     borrow::{Borrow, BorrowMut},
     cell::{Ref, RefCell},
     rc::Rc,
+    time::{Duration, Instant},
 };
 
 use super::{
@@ -12,91 +13,124 @@ use super::{
 use cached::{Cached, TimedCache};
 use jsonwebtoken::{
     errors::{Error, ErrorKind},
-    TokenData,
+    Algorithm, DecodingKey, Header, TokenData, Validation,
 };
-use serde::Deserialize;
+use serde::{de::DeserializeOwned, Deserialize};
 
 pub struct JwtDecoder {
     skip_validate: bool,
-    jwks_uri: String,
-    jwks_cache: Rc<TimedCache<String, Jwks>>,
+    validation: Validation,
+    cache: RefCell<JwksCache>,
 }
 
 impl Default for JwtDecoder {
     fn default() -> Self {
         Self {
             skip_validate: false,
-            jwks_cache: Rc::new(TimedCache::with_lifespan(3600)),
-            jwks_uri: "".into(),
+            cache: RefCell::new(JwksCache::new("".into(), Duration::from_secs(3600))),
+            validation: Validation::default(),
         }
     }
 }
 
 impl JwtDecoder {
-    pub async fn from_well_known(uri: impl Into<String>) -> Result<Self, String> {
+    pub async fn from_well_known(uri: String) -> Result<Self, String> {
         let config = OpenIdConfig::from_well_known(uri).await?;
 
         Ok(Self {
-            jwks_uri: config.jwks_uri,
+            cache: RefCell::new(JwksCache::new(config.jwks_uri, Duration::from_secs(3600))),
             ..Default::default()
         })
     }
 
-    pub async fn decode<'de, T>(token: impl Into<String>) -> Result<TokenData<T>, Error>
+    pub async fn decode<'de, T>(&self, token: impl AsRef<str>) -> Result<TokenData<T>, Error>
     where
-        T: Deserialize<'de>,
+        T: DeserializeOwned,
     {
-        Err(ErrorKind::InvalidToken.into())
-    }
-
-    async fn decode_symmetric<'de, T>(
-        &self,
-        token: impl Into<String>,
-    ) -> Result<TokenData<T>, Error> {
-        Err(ErrorKind::InvalidToken.into())
-    }
-
-    async fn decode_asymmetric<'de, T>(
-        &self,
-        token: impl Into<String>,
-    ) -> Result<TokenData<T>, Error> {
-        Err(ErrorKind::InvalidToken.into())
-    }
-
-    async fn fetch_jwks(&mut self) -> Result<&Jwks, String> {
-        if let Some(jwks) = self.jwks_cache.get_mut().cache_get(&self.jwks_uri) {
-            return Ok(jwks);
+        if self.skip_validate {
+            jsonwebtoken::dangerous_insecure_decode(token.as_ref())
         } else {
-            let jwks = Jwks::from_uri(self.jwks_uri.clone()).await?;
-            self.jwks_cache
-                .borrow_mut()
-                .cache_set(self.jwks_uri.clone(), jwks);
-            return Err("".into());
+            let header = jsonwebtoken::decode_header(token.as_ref())?;
+
+            match header.alg {
+                Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512 => {
+                    return self.decode_rsa(token.as_ref(), &header).await
+                }
+                _ => return Err(ErrorKind::InvalidAlgorithm.into()),
+            }
+        }
+    }
+
+    async fn jwks(&self) -> Result<Rc<Jwks>, Error> {
+        let jwks = self
+            .cache
+            .borrow_mut()
+            .jwks()
+            .await
+            .map_err(|_| Error::from(ErrorKind::InvalidKeyFormat))?;
+        Ok(jwks)
+    }
+
+    pub async fn decode_rsa<'de, T>(
+        &self,
+        token: &str,
+        header: &Header,
+    ) -> Result<TokenData<T>, Error>
+    where
+        T: DeserializeOwned,
+    {
+        let kid = header
+            .kid
+            .as_ref()
+            .ok_or(Error::from(ErrorKind::InvalidKeyFormat))?;
+
+        let jwks = self.jwks().await?;
+
+        let jwk = jwks
+            .jwk(kid)
+            .ok_or(Error::from(ErrorKind::InvalidKeyFormat))?;
+
+        let key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e);
+
+        jsonwebtoken::decode::<T>(&token, &key, &self.validation)
+    }
+}
+
+struct JwksCache {
+    uri: String,
+    ttl: Duration,
+    instant: Instant,
+    cache: Option<Rc<Jwks>>,
+}
+
+impl<'a> JwksCache {
+    pub fn new(uri: String, ttl: Duration) -> Self {
+        Self {
+            uri: uri,
+            ttl: ttl,
+            instant: Instant::now(),
+            cache: None,
+        }
+    }
+
+    pub fn cache_expired(&self) -> bool {
+        self.cache.is_none() || self.instant.elapsed() > self.ttl
+    }
+
+    pub async fn update_cache(&mut self) -> Result<(), String> {
+        self.cache = Some(Rc::new(Jwks::from_uri(&self.uri).await?));
+        Ok(())
+    }
+
+    pub async fn jwks(&mut self) -> Result<Rc<Jwks>, String> {
+        if self.cache_expired() {
+            self.update_cache().await?;
         }
 
-        // let cache = &mut self.jwks_cache;
-        // let jwks = Jwks::from_uri(uri.clone()).await?;
-        // cache.cache_set(uri.clone(), jwks);
-        // Err("".into())
-
-        // match cache.cache_get(&self.jwks_uri) {
-        //     Some(jwks) => Ok(jwks),
-        //     None => {
-        //         let jwks = Jwks::from_uri(self.jwks_uri).await?;
-        //         cache.cache_set(self.jwks_uri.clone(), jwks);
-
-        //         Ok(self.jwks_cache.cache_get(&self.jwks_uri).unwrap())
-        //     }
-        // }
-
-        // if let Some(jwks) = self.jwks_cache.cache_get(&self.jwks_uri) {
-        //     Ok(jwks)
-        // } else {
-        //     self.update_jwks_cache().await
-        // }
-    }
-
-    async fn fetch_jwk(&mut self, kid: &str) -> Result<&Jwk, String> {
-        Err("".into())
+        if let Some(ref jwks) = self.cache {
+            Ok(jwks.clone())
+        } else {
+            Err("failed to update jwks cache".into())
+        }
     }
 }
