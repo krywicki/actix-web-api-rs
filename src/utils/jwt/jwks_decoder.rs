@@ -3,18 +3,14 @@ use jsonwebtoken::{
     errors::{Error, ErrorKind},
     Algorithm, DecodingKey, TokenData,
 };
-use reqwest;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::de::DeserializeOwned;
 use std::{
-    borrow::Borrow,
     cell::RefCell,
-    ops::{Deref, DerefMut},
     rc::Rc,
-    sync::{Arc, RwLock},
     time::{Duration, Instant},
 };
 
-use crate::utils::oauth::models::{Jwk, Jwks};
+use crate::utils::oauth::models::Jwks;
 
 use super::{DecodeInfo, Decoder};
 

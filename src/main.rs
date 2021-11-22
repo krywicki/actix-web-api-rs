@@ -1,7 +1,7 @@
 #[allow(dead_code)]
 extern crate api;
 
-fn main() {
-    let i = 1_i32;
-    println!("Hello, world!");
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    Ok(())
 }
