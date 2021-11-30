@@ -1,10 +1,10 @@
 use std::fs::File;
 use std::io::BufReader;
 
-use mongodb::{Client, options::ClientOptions, Database};
-use mongodb::bson::{doc, Document};
+use mongodb::{Client, Database, IndexModel};
+use mongodb::options::IndexOptions;
+use mongodb::bson::{doc};
 use serde_json;
-use serde_json::{ Value };
 use std::collections::HashMap;
 
 
@@ -12,25 +12,37 @@ async fn seed_users(production:&Database) -> Result<(), Box<dyn std::error::Erro
     
     let names_reader = BufReader::new(File::open("data/names.json")?);    
     let names:Vec<HashMap<String, String>> = serde_json::from_reader(names_reader)?;
-    
-    let mut docs = vec!();
         
+    //== get/jit create users collection
+    let users = production.collection("users");
+
+    //== create index on email
+    
+    users.create_index(
+        IndexModel::builder().keys(doc!{"email": 1})
+            .options(IndexOptions::builder()
+                .unique(true)
+                .build()
+            ).build(),
+        None
+    ).await?;
+
+    //== add users to collection
     for name in names {
         let fname = &name["first_name"];
         let lname = &name["last_name"];
 
-        docs.push(
+        users.insert_one(
             doc!{
                 "first_name": fname,
                 "last_name": lname,
-                "email": format!("{}.{}@mail.com", fname, lname),
+                "email": format!("{}.{}@gmail.com", fname.to_lowercase(), lname.to_lowercase()),
                 "last_login": "2021-11-19T00:00:00+00:00"
-            }
-        )
+            },
+            None
+        ).await?;
     }
-
-    production.collection("users").insert_many(docs, None).await?;
-
+    
     Ok(())
 }
 
