@@ -1,18 +1,12 @@
 use actix_web::web;
-use mongodb::{bson::Document, Collection, Database};
+use mongodb::{Collection, Database};
 use serde::{Deserialize, Serialize};
 
-pub trait MongoDB {
-    fn collection_name() -> &'static str;
+use crate::MongoDB;
 
-    fn collection(db: &web::Data<Database>) -> Collection<Self>
-    where
-        Self: Sized;
-
-    fn doc_collection(db: &web::Data<Database>) -> Collection<Document> {
-        db.collection(Self::collection_name())
-    }
-}
+///
+/// User Model
+///
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct User {
@@ -27,22 +21,7 @@ impl MongoDB for User {
         "users"
     }
 
-    fn collection(db: &web::Data<Database>) -> Collection<Self> {
+    fn collection<T>(db: &web::Data<Database>) -> Collection<T> {
         db.collection(Self::collection_name())
     }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct UserOut {
-    pub first_name: String,
-    pub last_name: String,
-    pub email: String,
-    pub last_login: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Page<T: Sized> {
-    pub count: usize,
-    pub items: Vec<T>,
-    pub next: Option<String>,
 }

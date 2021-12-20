@@ -1,7 +1,8 @@
-use std::{error::Error, fmt};
+use std::{borrow::Cow, error::Error, fmt};
 
 use actix_web::{http::StatusCode, HttpResponse, ResponseError};
-use serde_json::json;
+use serde_json::{json, Map};
+use validator::{ValidationError, ValidationErrors};
 
 #[derive(Debug)]
 pub struct RequestError {
@@ -9,6 +10,12 @@ pub struct RequestError {
     pub message: String,
     pub detail: Option<serde_json::Value>,
     pub source: Option<Box<dyn Error>>,
+}
+
+impl RequestError {
+    pub fn builder() -> RequestErrorBuilder {
+        RequestErrorBuilder::default()
+    }
 }
 
 pub struct RequestErrorBuilder {
@@ -30,28 +37,33 @@ impl Default for RequestErrorBuilder {
 }
 
 impl RequestErrorBuilder {
-    pub fn code(&mut self, code: StatusCode) -> &mut Self {
+    pub fn code(mut self, code: StatusCode) -> Self {
         self.code = code;
         self
     }
 
-    pub fn message(&mut self, message: String) -> &mut Self {
+    pub fn message(mut self, message: String) -> Self {
         self.message = message;
         self
     }
 
-    pub fn detail(&mut self, detail: serde_json::Value) -> &mut Self {
-        self.detail = Some(detail);
+    pub fn detail(mut self, detail: Option<serde_json::Value>) -> Self {
+        self.detail = detail;
         self
     }
 
-    pub fn source(&mut self, source: Box<dyn std::error::Error>) -> &mut self {
-        self.source = Some(source);
+    pub fn source(mut self, source: Option<Box<dyn std::error::Error>>) -> Self {
+        self.source = source;
         self
     }
 
     pub fn build(self) -> RequestError {
-        RequestError {}
+        RequestError {
+            code: self.code,
+            message: self.message,
+            detail: self.detail,
+            source: self.source,
+        }
     }
 }
 
@@ -95,6 +107,40 @@ impl From<mongodb::error::Error> for RequestError {
             message: StatusCode::INTERNAL_SERVER_ERROR.to_string(),
             detail: None,
             source: Some(Box::new(error)),
+        }
+    }
+}
+
+//
+// Convert Validation Errors into RequestError
+//
+impl From<ValidationError> for RequestError {
+    fn from(error: ValidationError) -> Self {
+        RequestError {
+            code: StatusCode::BAD_REQUEST,
+            message: error
+                .message
+                .unwrap_or(Cow::from("Validation Error"))
+                .into(),
+            detail: Some(serde_json::value::to_value(error.params).unwrap()),
+            source: None,
+        }
+    }
+}
+
+impl From<ValidationErrors> for RequestError {
+    fn from(error: ValidationErrors) -> Self {
+        let mut errors: Map<String, serde_json::Value> = Map::new();
+
+        error.errors().iter().for_each(|e| {
+            errors.insert(e.0.to_string(), serde_json::to_value(e.1).unwrap());
+        });
+
+        RequestError {
+            code: StatusCode::BAD_REQUEST,
+            message: "Validation Error".into(),
+            detail: Some(errors.into()),
+            source: None,
         }
     }
 }

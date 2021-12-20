@@ -5,11 +5,15 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Current File",
-            "type": "python",
+            "name": "actix-web-api-rs",
+            "type": "lldb",
             "request": "launch",
-            "program": "${file}",
-            "console": "integratedTerminal"
+            "program": "${workspaceRoot}/target/debug/api",
+            "args": [],
+            "cwd": "${workspaceRoot}",
+            "env": {
+                "RUST_BACKTRACE": "1"
+            }
         }
     ]
 }

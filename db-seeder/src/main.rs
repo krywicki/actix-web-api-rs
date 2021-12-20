@@ -17,7 +17,6 @@ async fn seed_users(production:&Database) -> Result<(), Box<dyn std::error::Erro
     let users = production.collection("users");
 
     //== create index on email
-    
     users.create_index(
         IndexModel::builder().keys(doc!{"email": 1})
             .options(IndexOptions::builder()
@@ -42,6 +41,17 @@ async fn seed_users(production:&Database) -> Result<(), Box<dyn std::error::Erro
             None
         ).await?;
     }
+
+    //== add self to collection
+    users.insert_one(
+        doc!{
+            "first_name": "Joe", 
+            "last_name": "Krywicki",
+            "email": "joe.krywicki@gmail.com",
+            "last_login": "2021-11-19T00:00:00+00:00"
+        },
+        None
+    ).await?;
     
     Ok(())
 }
