@@ -45,7 +45,7 @@ impl From<serde_urlencoded::de::Error> for RequestError {
     fn from(error: serde_urlencoded::de::Error) -> Self {
         RequestError::builder()
             .code(StatusCode::BAD_REQUEST)
-            .message("Query Parameter(s) Error".into())
+            .message("Query Parameter(s) Error")
             .detail(Some(error.to_string().into()))
             .source(Some(Box::new(error)))
             .build()

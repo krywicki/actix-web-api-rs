@@ -1,11 +1,12 @@
-use std::collections::HashMap;
+use std::{borrow::Borrow, collections::HashMap};
 
+use actix_web::http::StatusCode;
 use mongodb::bson::{doc, oid::ObjectId, Document};
 use serde::{de::IntoDeserializer, Deserialize, Serialize};
 use serde_json::json;
 use validator::{self, Validate, ValidateArgs, ValidationError, ValidationErrors};
 
-use crate::{MongoDBFilter, RequestError, TryFromPath};
+use crate::{error::ErrorCode, MongoDBFilter, RequestError, TryFromPath};
 
 pub trait FromPath<T>: Sized
 where
@@ -25,58 +26,31 @@ pub enum EmailOrObjectId {
     ObjectId(ObjectId),
 }
 
-impl FromPath<&String> for EmailOrObjectId {
-    fn from_path(name: &'static str, value: &String) -> Result<Self, RequestError> {
+impl EmailOrObjectId {
+    fn validate(value: &String) -> Result<Self, String> {
         //== attempt ObjectId parse
         if let Ok(value) = ObjectId::parse_str(&value) {
             return Ok(EmailOrObjectId::ObjectId(value));
         }
 
-        if !validator::validate_email(&value) {
-            let e = ValidationError {
-                code: "INVALID_PATH_PART",
-                message: Some("Invalid Email or ObjectId value"),
-                params: HashMap::from([(
-                    "loc",
-                    json!({
-                        "path":
-                    }),
-                )]),
-            };
+        if !validator::validate_email(value.as_str()) {
+            return Err("Invalid email or objectId value".into());
         }
 
         //== set as email and validate
-        let result = EmailOrObjectId::Email(value.clone());
-
-        result.validate_args(&name)?;
-
-        return Ok(result);
+        return Ok(EmailOrObjectId::Email(value.clone()));
     }
 }
 
-impl<'v_a> ValidateArgs<'v_a> for EmailOrObjectId {
-    type Args = &'static str;
-
-    fn validate_args(&self, field_name: Self::Args) -> Result<(), ValidationErrors> {
-        let mut errs = ValidationErrors::new();
-
-        match self {
-            Self::Email(ref value) => {
-                if !validator::validate_email(value) {
-                    errs.add(
-                        field_name,
-                        ValidationError::new("invalid email or bson Object Id"),
-                    )
-                }
-            }
-            _ => {}
-        }
-
-        if errs.is_empty() {
-            Ok(())
-        } else {
-            Err(errs)
-        }
+impl FromPath<&String> for EmailOrObjectId {
+    fn from_path(name: &'static str, value: &String) -> Result<Self, RequestError> {
+        Ok(EmailOrObjectId::validate(&value).map_err(|e| {
+            RequestError::builder()
+                .code(StatusCode::BAD_REQUEST)
+                .error(ErrorCode::InvalidPathPart)
+                .message(e)
+                .build()
+        })?)
     }
 }
 

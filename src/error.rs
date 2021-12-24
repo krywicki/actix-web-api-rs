@@ -20,6 +20,7 @@ impl RequestError {
 
 pub struct RequestErrorBuilder {
     code: StatusCode,
+    error: String,
     message: String,
     detail: Option<serde_json::Value>,
     source: Option<Box<dyn Error>>,
@@ -29,6 +30,7 @@ impl Default for RequestErrorBuilder {
     fn default() -> Self {
         Self {
             code: StatusCode::BAD_REQUEST,
+            error: "".into(),
             message: "".into(),
             detail: None,
             source: None,
@@ -42,13 +44,21 @@ impl RequestErrorBuilder {
         self
     }
 
-    pub fn message(mut self, message: String) -> Self {
-        self.message = message;
+    pub fn error<T: Into<String>>(mut self, error: T) -> Self {
+        self.error = error.into();
         self
     }
 
-    pub fn detail(mut self, detail: Option<serde_json::Value>) -> Self {
-        self.detail = detail;
+    pub fn message<T: Into<String>>(mut self, message: T) -> Self {
+        self.message = message.into();
+        self
+    }
+
+    pub fn detail<T>(mut self, detail: T) -> Self
+    where
+        T: Into<Option<serde_json::Value>>,
+    {
+        self.detail = detail.into();
         self
     }
 
@@ -142,5 +152,27 @@ impl From<ValidationErrors> for RequestError {
             detail: Some(errors.into()),
             source: None,
         }
+    }
+}
+
+pub enum ErrorCode {
+    InvalidPathPart,
+    ResourceNotFound,
+}
+
+impl Into<String> for ErrorCode {
+    fn into(self) -> String {
+        self.to_string()
+    }
+}
+
+impl fmt::Display for ErrorCode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let val = match *self {
+            Self::InvalidPathPart => "INVALID_PATH_PART",
+            Self::ResourceNotFound => "RESOURCE_NOT_FOUND",
+        };
+
+        write!(f, "{}", val)
     }
 }

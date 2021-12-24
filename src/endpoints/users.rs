@@ -4,23 +4,28 @@ use serde::{Deserialize, Serialize};
 use validator::Validate;
 
 use crate::{
-    fields::{EmailOrObjectId, FromField},
+    fields::{EmailOrObjectId, FromPath},
     models::User,
-    schemas::{Page, UserOut},
+    schemas::{Page, PageBuilder, UserOut},
     validators,
     web::Query,
     MongoDB, MongoDBFilter, RequestError, RequestResult,
 };
 
-pub async fn get_users(query: Query<qparams::GetUsersParams>) -> RequestResult<impl Responder> {
-    Ok(HttpResponse::Ok())
+pub async fn get_users(
+    query: Query<qparams::GetUsersParams>,
+    db: web::Data<Database>,
+) -> RequestResult<impl Responder> {
+    let cursor = User::collection(&db).find(None, None).await?;
+    let page: Page<User> = PageBuilder::default().build(cursor).await?;
+    Ok(web::Json(page))
 }
 
 pub async fn get_user(
     id: web::Path<String>,
     db: web::Data<Database>,
 ) -> RequestResult<impl Responder> {
-    let id = EmailOrObjectId::from_field("id", id.as_ref())?;
+    let id = EmailOrObjectId::from_path("id", id.as_ref())?;
 
     //== get user
     let user = User::collection(&db)
@@ -38,7 +43,7 @@ mod errs {
     pub fn user_not_found() -> RequestError {
         RequestError::builder()
             .code(StatusCode::NOT_FOUND)
-            .message("User not found".into())
+            .message("User not found")
             .build()
     }
 }
