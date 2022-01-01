@@ -11,23 +11,31 @@ pub mod web;
 mod error;
 pub use error::RequestError;
 pub use error::RequestErrorBuilder;
-use mongodb::bson::Document;
-use mongodb::Collection;
-use mongodb::Database;
+use mongodb::{bson::Document, options::FindOptions, Collection, Database};
 
 pub type RequestResult<T> = std::result::Result<T, RequestError>;
 
-pub trait MongoDB {
+pub trait MongoCollection {
     fn collection_name() -> &'static str;
     fn collection<T: Sized>(db: &actix_web::web::Data<Database>) -> Collection<T>;
 }
 
-pub trait MongoDBFilter {
-    fn mongo_filter(&self) -> Document;
+pub trait MongoFilter {
+    fn mongo_filter(&self) -> Option<Document>;
 }
 
-pub trait TryFromPath<T> {
-    fn try_from_path(name: &str, value: &actix_web::web::Path<T>) -> Result<Self, RequestError>
-    where
-        Self: Sized;
+pub trait MongoFindOptions {
+    fn mongo_find_options(&self) -> Option<FindOptions>;
+}
+
+pub trait MongoTryFindOptions {
+    type Error;
+
+    fn mongo_try_find_options(&self) -> Result<Option<FindOptions>, Self::Error>;
+}
+
+pub trait MongoTryFilter {
+    type Error;
+
+    fn mongo_try_filter(&self) -> Result<Option<Document>, Self::Error>;
 }

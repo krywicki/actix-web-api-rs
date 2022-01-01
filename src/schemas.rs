@@ -41,14 +41,14 @@ impl<T: Sized> Page<T> {
 
 pub struct PageBuilder {
     pub limit: usize,
-    pub from: usize,
+    pub offset: usize,
 }
 
 impl Default for PageBuilder {
     fn default() -> Self {
         Self {
             limit: 100,
-            from: 0,
+            offset: 0,
         }
     }
 }
@@ -60,7 +60,7 @@ impl PageBuilder {
     }
 
     pub fn from(mut self, value: usize) -> Self {
-        self.from = value;
+        self.offset = value;
         self
     }
 
@@ -72,7 +72,7 @@ impl PageBuilder {
 
         // get items
         while page.items.len() < self.limit {
-            if let Some(item) = cursor.try_next().await.map_err(|e| RequestError::from(e))? {
+            if let Some(item) = cursor.try_next().await.map_err(RequestError::from)? {
                 page.items.push(item);
             } else {
                 break;
@@ -84,7 +84,7 @@ impl PageBuilder {
 
         // set next (if any)
         if page.count == self.limit {
-            page.next = Some(page.count + self.from);
+            page.next = Some(page.count + self.offset);
         }
 
         Ok(page)

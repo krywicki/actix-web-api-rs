@@ -1,19 +1,10 @@
-use std::{borrow::Borrow, collections::HashMap};
-
 use actix_web::http::StatusCode;
 use mongodb::bson::{doc, oid::ObjectId, Document};
-use serde::{de::IntoDeserializer, Deserialize, Serialize};
-use serde_json::json;
-use validator::{self, Validate, ValidateArgs, ValidationError, ValidationErrors};
+use serde::{Deserialize, Serialize};
+use validator;
 
-use crate::{error::ErrorCode, MongoDBFilter, RequestError, TryFromPath};
-
-pub trait FromPath<T>: Sized
-where
-    T: Sized,
-{
-    fn from_path(name: &'static str, value: T) -> Result<Self, RequestError>;
-}
+use super::FromPath;
+use crate::{error::ErrorCode, MongoFilter, RequestError};
 
 ///
 /// EmailOrObjectId
@@ -54,11 +45,11 @@ impl FromPath<&String> for EmailOrObjectId {
     }
 }
 
-impl MongoDBFilter for EmailOrObjectId {
-    fn mongo_filter(&self) -> Document {
+impl MongoFilter for EmailOrObjectId {
+    fn mongo_filter(&self) -> Option<Document> {
         match self {
-            Self::Email(ref value) => doc! { "email": value },
-            Self::ObjectId(ref value) => doc! { "_id": value },
+            Self::Email(ref value) => Some(doc! { "email": value }),
+            Self::ObjectId(ref value) => Some(doc! { "_id": value }),
         }
     }
 }

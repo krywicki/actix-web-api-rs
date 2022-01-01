@@ -2,7 +2,7 @@ use actix_web::web;
 use mongodb::{Collection, Database};
 use serde::{Deserialize, Serialize};
 
-use crate::MongoDB;
+use crate::MongoCollection;
 
 ///
 /// User Model
@@ -16,7 +16,7 @@ pub struct User {
     pub last_login: String,
 }
 
-impl MongoDB for User {
+impl MongoCollection for User {
     fn collection_name() -> &'static str {
         "users"
     }
