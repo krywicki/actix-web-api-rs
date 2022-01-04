@@ -1,5 +1,5 @@
 use actix_web::{http::StatusCode, web, Responder};
-use mongodb::{bson::doc, Database};
+use mongodb::{bson::doc, options::FindOptions, Database};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -7,7 +7,7 @@ use crate::{
     models::User,
     schemas::{Page, PageBuilder, UserOut},
     web::Query,
-    MongoCollection, MongoFilter, RequestError, RequestResult,
+    MongoCollection, MongoFilter, MongoTryFindOptions, RequestError, RequestResult,
 };
 
 ///
@@ -18,10 +18,12 @@ pub async fn get_users(
     db: web::Data<Database>,
 ) -> RequestResult<impl Responder> {
     //== create collection cursor
-    let cursor = User::collection(&db).find(None, None).await?;
+    let cursor = User::collection(&db)
+        .find(query.mongo_filter(), query.mongo_try_find_options()?)
+        .await?;
 
     //== build page of results and return
-    let page: Page<User> = PageBuilder::default().build(cursor).await?;
+    let page: Page<User> = PageBuilder::from(&query.page_params).build(cursor).await?;
     Ok(web::Json(page))
 }
 
@@ -44,6 +46,24 @@ pub async fn get_user(
     Ok(web::Json(user))
 }
 
+///
+/// Update Single User
+///
+pub async fn update_user(
+    id: web::Path<String>,
+    db: web::Data<Database>,
+) -> RequestResult<impl Responder> {
+    let id = EmailOrObjectId::from_path(":id", &*id)?;
+
+    User::collection(&db).find_one_and_update(filter, update, options)
+
+    let items = User::collection(&db)
+        .find_one(id.mongo_filter(), FindOn)
+        .await?;
+
+    Ok(web::Json(RequestError::builder().build()))
+}
+
 mod errs {
     use super::*;
 
@@ -59,23 +79,18 @@ mod qparams {
     use mongodb::options::FindOptions;
     use validator::Validate;
 
-    use crate::{fields::SortFields, sortfields, MongoFindOptions, MongoTryFindOptions};
+    use crate::{
+        fields::SortFields, schemas::PageParams, sortfields, MongoFindOptions, MongoTryFindOptions,
+    };
 
     use super::*;
 
     #[derive(Serialize, Deserialize, Validate)]
     pub struct GetUsersParams {
-        o: Option<String>,
+        pub o: Option<String>,
 
-        #[serde(default = "GetUsersParams::default_limit")]
-        #[validate(range(min = 1, max = 1000))]
-        limit: usize,
-    }
-
-    impl GetUsersParams {
-        pub fn default_limit() -> usize {
-            100
-        }
+        #[serde(flatten)]
+        pub page_params: PageParams,
     }
 
     impl MongoFilter for GetUsersParams {
@@ -88,15 +103,61 @@ mod qparams {
         type Error = RequestError;
 
         fn mongo_try_find_options(&self) -> Result<Option<FindOptions>, Self::Error> {
-            let sort_fields: SortFields = sortfields!["last_name", "first_name", "email"];
-
             let sort = if let Some(ref _sort) = self.o {
+                let sort_fields: SortFields = sortfields!["last_name", "first_name", "email"];
                 Some(sort_fields.sort_options(_sort.as_str())?)
             } else {
                 None
             };
 
-            Ok(Some(FindOptions::builder().limit(10).sort(sort).build()))
+            Ok(Some(
+                FindOptions::builder()
+                    .limit(self.page_params.limit)
+                    .sort(sort)
+                    .build(),
+            ))
+        }
+    }
+}
+
+mod body {
+    use super::*;
+    use mongodb::options::UpdateModifications;
+    use validator::Validate;
+
+    use crate::{MongoFilter, MongoUpdateModifications};
+
+
+    #[derive(Serialize, Deserialize, Validate)]
+    pub struct UpdateUserBody {
+        first_name: Option<String>,
+        last_name: Option<String>,
+        last_login: Option<String>
+    }
+
+    impl UpdateUserBody {
+        pub fn is_empty(&self) -> bool {
+            self.first_name.is_none() && self.last_name.is_none() && self.last_login.is_none()
+        }
+    }
+
+    impl MongoUpdateModifications for UpdateUserBody {
+        fn mongo_update_modifications(&self) -> UpdateModifications {
+            let mut doc = doc!{};
+
+            if let Some(ref first_name) = self.first_name {
+                doc.insert("first_name", first_name);
+            }
+
+            if let Some(ref last_name) = self.last_name {
+                doc.insert("last_name", last_name);
+            }
+
+            if let Some(ref last_login) = self.last_login {
+                doc.insert("last_login", last_login);
+            }
+
+            UpdateModifications::Document(doc)
         }
     }
 }

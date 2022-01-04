@@ -1,6 +1,7 @@
 use futures::TryStreamExt;
 use mongodb::Cursor;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use validator::Validate;
 
 use crate::RequestError;
 
@@ -22,7 +23,7 @@ pub struct UserOut {
 pub struct Page<T: Sized> {
     pub count: usize,
     pub items: Vec<T>,
-    pub next: Option<usize>,
+    pub next: Option<i64>,
 }
 
 impl<T: Sized> Page<T> {
@@ -33,60 +34,58 @@ impl<T: Sized> Page<T> {
             next: None,
         }
     }
-
-    pub fn builder() -> PageBuilder {
-        PageBuilder::default()
-    }
 }
 
 pub struct PageBuilder {
-    pub limit: usize,
-    pub offset: usize,
-}
-
-impl Default for PageBuilder {
-    fn default() -> Self {
-        Self {
-            limit: 100,
-            offset: 0,
-        }
-    }
+    pub offset: i64,
+    pub limit: i64,
 }
 
 impl PageBuilder {
-    pub fn limit(mut self, value: usize) -> Self {
-        self.limit = value;
-        self
-    }
-
-    pub fn from(mut self, value: usize) -> Self {
-        self.offset = value;
-        self
-    }
-
-    pub async fn build<T>(self, mut cursor: Cursor<T>) -> Result<Page<T>, RequestError>
+    pub async fn build<T>(self, cursor: Cursor<T>) -> Result<Page<T>, RequestError>
     where
         T: DeserializeOwned + Sync + Unpin + Send,
     {
-        let mut page = Page::new();
+        let items: Vec<T> = cursor.try_collect().await?;
+        let next = if items.len() < self.limit as usize {
+            None
+        } else {
+            Some(self.offset + self.limit)
+        };
 
-        // get items
-        while page.items.len() < self.limit {
-            if let Some(item) = cursor.try_next().await.map_err(RequestError::from)? {
-                page.items.push(item);
-            } else {
-                break;
-            }
+        Ok(Page {
+            count: items.len(),
+            next: next,
+            items: items,
+        })
+    }
+}
+
+impl From<&PageParams> for PageBuilder {
+    fn from(params: &PageParams) -> Self {
+        Self {
+            limit: params.limit,
+            offset: params.offset,
         }
+    }
+}
 
-        // set items count
-        page.count = page.items.len();
+#[derive(Serialize, Deserialize, Validate)]
+pub struct PageParams {
+    #[validate(range(min = 1, max = 1000))]
+    #[serde(default = "PageParams::default_limit")]
+    pub limit: i64,
 
-        // set next (if any)
-        if page.count == self.limit {
-            page.next = Some(page.count + self.offset);
-        }
+    #[validate(range(min = 0))]
+    #[serde(default = "PageParams::default_offset")]
+    pub offset: i64,
+}
 
-        Ok(page)
+impl PageParams {
+    pub fn default_limit() -> i64 {
+        100
+    }
+    pub fn default_offset() -> i64 {
+        0
     }
 }

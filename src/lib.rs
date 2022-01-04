@@ -11,6 +11,7 @@ pub mod web;
 mod error;
 pub use error::RequestError;
 pub use error::RequestErrorBuilder;
+use mongodb::options::UpdateModifications;
 use mongodb::{bson::Document, options::FindOptions, Collection, Database};
 
 pub type RequestResult<T> = std::result::Result<T, RequestError>;
@@ -38,4 +39,8 @@ pub trait MongoTryFilter {
     type Error;
 
     fn mongo_try_filter(&self) -> Result<Option<Document>, Self::Error>;
+}
+
+pub trait MongoUpdateModifications {
+    fn mongo_update_modifications(&self) -> UpdateModifications;
 }

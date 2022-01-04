@@ -7,6 +7,7 @@ use validator::{ValidationError, ValidationErrors};
 #[derive(Debug)]
 pub struct RequestError {
     pub code: StatusCode,
+    pub error: String,
     pub message: String,
     pub detail: Option<serde_json::Value>,
     pub source: Option<Box<dyn Error>>,
@@ -70,6 +71,7 @@ impl RequestErrorBuilder {
     pub fn build(self) -> RequestError {
         RequestError {
             code: self.code,
+            error: self.error,
             message: self.message,
             detail: self.detail,
             source: self.source,
@@ -102,6 +104,7 @@ impl ResponseError for RequestError {
 
     fn error_response(&self) -> HttpResponse {
         let json = json!({
+            "error": self.error,
             "message": self.message,
             "detail": self.detail
         });
@@ -114,6 +117,7 @@ impl From<mongodb::error::Error> for RequestError {
     fn from(error: mongodb::error::Error) -> Self {
         Self {
             code: StatusCode::INTERNAL_SERVER_ERROR,
+            error: StatusCode::INTERNAL_SERVER_ERROR.to_string(),
             message: StatusCode::INTERNAL_SERVER_ERROR.to_string(),
             detail: None,
             source: Some(Box::new(error)),
@@ -128,6 +132,7 @@ impl From<ValidationError> for RequestError {
     fn from(error: ValidationError) -> Self {
         RequestError {
             code: StatusCode::BAD_REQUEST,
+            error: ErrorCode::ValidationError.into(),
             message: error
                 .message
                 .unwrap_or(Cow::from("Validation Error"))
@@ -148,6 +153,7 @@ impl From<ValidationErrors> for RequestError {
 
         RequestError {
             code: StatusCode::BAD_REQUEST,
+            error: ErrorCode::ValidationError.into(),
             message: "Validation Error".into(),
             detail: Some(errors.into()),
             source: None,
@@ -157,7 +163,9 @@ impl From<ValidationErrors> for RequestError {
 
 pub enum ErrorCode {
     InvalidPathPart,
+    InvalidQueryParam,
     ResourceNotFound,
+    ValidationError,
 }
 
 impl Into<String> for ErrorCode {
@@ -171,6 +179,8 @@ impl fmt::Display for ErrorCode {
         let val = match *self {
             Self::InvalidPathPart => "INVALID_PATH_PART",
             Self::ResourceNotFound => "RESOURCE_NOT_FOUND",
+            Self::InvalidQueryParam => "INVALID_QUERY_PARAM",
+            Self::ValidationError => "VALIDATION_ERROR",
         };
 
         write!(f, "{}", val)

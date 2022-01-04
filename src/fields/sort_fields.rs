@@ -1,8 +1,8 @@
-use std::{collections::HashMap, rc::Rc};
+use std::collections::HashMap;
 
 use mongodb::bson::{doc, Document};
 
-use crate::RequestError;
+use crate::{error::ErrorCode, RequestError};
 
 pub struct SortField {
     pub name: String,
@@ -111,7 +111,8 @@ impl SortFields {
 
         let sort_field = self.get(name).ok_or_else(|| {
             RequestError::builder()
-                .message(format!("Invalid sort field: {}", name))
+                .error(ErrorCode::InvalidQueryParam)
+                .message(format!("Invalid sort field value: {}", name))
                 .build()
         })?;
 
