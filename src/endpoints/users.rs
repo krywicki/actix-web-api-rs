@@ -1,13 +1,17 @@
 use actix_web::{http::StatusCode, web, Responder};
-use mongodb::{bson::doc, options::FindOptions, Database};
+use mongodb::{
+    bson::doc,
+    options::{FindOneAndUpdateOptions, ReturnDocument},
+    Database,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     fields::{EmailOrObjectId, FromPath},
     models::User,
-    schemas::{Page, PageBuilder, UserOut},
+    schemas::{Page, PageBuilder},
     web::Query,
-    MongoCollection, MongoFilter, MongoTryFindOptions, RequestError, RequestResult,
+    MongoCollection, MongoFilter, RequestError, RequestResult,
 };
 
 ///
@@ -19,7 +23,7 @@ pub async fn get_users(
 ) -> RequestResult<impl Responder> {
     //== create collection cursor
     let cursor = User::collection(&db)
-        .find(query.mongo_filter(), query.mongo_try_find_options()?)
+        .find(None, query.mongo_find_options()?)
         .await?;
 
     //== build page of results and return
@@ -38,7 +42,7 @@ pub async fn get_user(
 
     //== get user
     let user = User::collection(&db)
-        .find_one(id.mongo_filter(), None)
+        .find_one(id.mongo_filter()?, None)
         .await?;
 
     //== unwrap and return user
@@ -52,16 +56,22 @@ pub async fn get_user(
 pub async fn update_user(
     id: web::Path<String>,
     db: web::Data<Database>,
+    body: web::Json<body::UpdateUserBody>,
 ) -> RequestResult<impl Responder> {
     let id = EmailOrObjectId::from_path(":id", &*id)?;
 
-    User::collection(&db).find_one_and_update(filter, update, options)
-
-    let items = User::collection(&db)
-        .find_one(id.mongo_filter(), FindOn)
+    let user = User::collection(&db)
+        .find_one_and_update(
+            id.mongo_filter()?,
+            body.mongo_update_modifications()?,
+            FindOneAndUpdateOptions::builder()
+                .return_document(ReturnDocument::After)
+                .build(),
+        )
         .await?;
 
-    Ok(web::Json(RequestError::builder().build()))
+    let user: User = user.ok_or_else(errs::user_not_found)?;
+    Ok(web::Json(user))
 }
 
 mod errs {
@@ -76,14 +86,11 @@ mod errs {
 }
 
 mod qparams {
+    use super::*;
     use mongodb::options::FindOptions;
     use validator::Validate;
 
-    use crate::{
-        fields::SortFields, schemas::PageParams, sortfields, MongoFindOptions, MongoTryFindOptions,
-    };
-
-    use super::*;
+    use crate::{fields::SortFields, schemas::PageParams, sortfields};
 
     #[derive(Serialize, Deserialize, Validate)]
     pub struct GetUsersParams {
@@ -93,18 +100,10 @@ mod qparams {
         pub page_params: PageParams,
     }
 
-    impl MongoFilter for GetUsersParams {
-        fn mongo_filter(&self) -> Option<mongodb::bson::Document> {
-            None
-        }
-    }
-
-    impl MongoTryFindOptions for GetUsersParams {
-        type Error = RequestError;
-
-        fn mongo_try_find_options(&self) -> Result<Option<FindOptions>, Self::Error> {
+    impl GetUsersParams {
+        pub fn mongo_find_options(&self) -> Result<Option<FindOptions>, RequestError> {
             let sort = if let Some(ref _sort) = self.o {
-                let sort_fields: SortFields = sortfields!["last_name", "first_name", "email"];
+                let sort_fields = sortfields!["last_name", "first_name", "email"];
                 Some(sort_fields.sort_options(_sort.as_str())?)
             } else {
                 None
@@ -117,6 +116,10 @@ mod qparams {
                     .build(),
             ))
         }
+
+        fn mongo_filter(&self) -> Result<Option<mongodb::bson::Document>, RequestError> {
+            Ok(None)
+        }
     }
 }
 
@@ -125,25 +128,24 @@ mod body {
     use mongodb::options::UpdateModifications;
     use validator::Validate;
 
-    use crate::{MongoFilter, MongoUpdateModifications};
-
+    use crate::{error::ErrorCode, validators};
 
     #[derive(Serialize, Deserialize, Validate)]
+    #[serde(deny_unknown_fields)]
     pub struct UpdateUserBody {
+        #[validate(custom = "validators::validate_alpha_numeric")]
         first_name: Option<String>,
+
+        #[validate(custom = "validators::validate_alpha_numeric")]
         last_name: Option<String>,
-        last_login: Option<String>
+
+        #[validate(custom = "validators::validate_iso_8601")]
+        last_login: Option<String>,
     }
 
     impl UpdateUserBody {
-        pub fn is_empty(&self) -> bool {
-            self.first_name.is_none() && self.last_name.is_none() && self.last_login.is_none()
-        }
-    }
-
-    impl MongoUpdateModifications for UpdateUserBody {
-        fn mongo_update_modifications(&self) -> UpdateModifications {
-            let mut doc = doc!{};
+        pub fn mongo_update_modifications(&self) -> Result<UpdateModifications, RequestError> {
+            let mut doc = doc! {};
 
             if let Some(ref first_name) = self.first_name {
                 doc.insert("first_name", first_name);
@@ -157,7 +159,14 @@ mod body {
                 doc.insert("last_login", last_login);
             }
 
-            UpdateModifications::Document(doc)
+            if doc.is_empty() {
+                Err(RequestError::builder()
+                    .error(ErrorCode::InvalidBody)
+                    .message("Cannot update user with null/empty content")
+                    .build())
+            } else {
+                Ok(UpdateModifications::Document(doc! { "$set": doc }))
+            }
         }
     }
 }

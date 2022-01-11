@@ -46,10 +46,12 @@ impl FromPath<&String> for EmailOrObjectId {
 }
 
 impl MongoFilter for EmailOrObjectId {
-    fn mongo_filter(&self) -> Option<Document> {
+    type Error = RequestError;
+
+    fn mongo_filter(&self) -> Result<Document, Self::Error> {
         match self {
-            Self::Email(ref value) => Some(doc! { "email": value }),
-            Self::ObjectId(ref value) => Some(doc! { "_id": value }),
+            Self::Email(ref value) => Ok(doc! { "email": value }),
+            Self::ObjectId(ref value) => Ok(doc! { "_id": value }),
         }
     }
 }

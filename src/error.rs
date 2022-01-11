@@ -1,6 +1,7 @@
 use std::{borrow::Cow, error::Error, fmt};
 
 use actix_web::{http::StatusCode, HttpResponse, ResponseError};
+use log::error;
 use serde_json::{json, Map};
 use validator::{ValidationError, ValidationErrors};
 
@@ -115,6 +116,8 @@ impl ResponseError for RequestError {
 
 impl From<mongodb::error::Error> for RequestError {
     fn from(error: mongodb::error::Error) -> Self {
+        error!("{}", error.to_string());
+
         Self {
             code: StatusCode::INTERNAL_SERVER_ERROR,
             error: StatusCode::INTERNAL_SERVER_ERROR.to_string(),
@@ -166,6 +169,7 @@ pub enum ErrorCode {
     InvalidQueryParam,
     ResourceNotFound,
     ValidationError,
+    InvalidBody,
 }
 
 impl Into<String> for ErrorCode {
@@ -181,6 +185,7 @@ impl fmt::Display for ErrorCode {
             Self::ResourceNotFound => "RESOURCE_NOT_FOUND",
             Self::InvalidQueryParam => "INVALID_QUERY_PARAM",
             Self::ValidationError => "VALIDATION_ERROR",
+            Self::InvalidBody => "INVALID_BODY",
         };
 
         write!(f, "{}", val)
