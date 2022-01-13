@@ -1,7 +1,8 @@
 use std::{borrow::Cow, error::Error, fmt};
 
 use actix_web::{http::StatusCode, HttpResponse, ResponseError};
-use log::error;
+use lazy_static::__Deref;
+use log::{error, warn};
 use serde_json::{json, Map};
 use validator::{ValidationError, ValidationErrors};
 
@@ -11,7 +12,7 @@ pub struct RequestError {
     pub error: String,
     pub message: String,
     pub detail: Option<serde_json::Value>,
-    pub source: Option<Box<dyn Error>>,
+    pub source: Option<serde_json::Value>,
 }
 
 impl RequestError {
@@ -25,7 +26,7 @@ pub struct RequestErrorBuilder {
     error: String,
     message: String,
     detail: Option<serde_json::Value>,
-    source: Option<Box<dyn Error>>,
+    source: Option<serde_json::Value>,
 }
 
 impl Default for RequestErrorBuilder {
@@ -64,7 +65,7 @@ impl RequestErrorBuilder {
         self
     }
 
-    pub fn source(mut self, source: Option<Box<dyn std::error::Error>>) -> Self {
+    pub fn source(mut self, source: Option<serde_json::Value>) -> Self {
         self.source = source;
         self
     }
@@ -85,16 +86,14 @@ impl Error for RequestError {}
 impl fmt::Display for RequestError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let json = json!({
+            "code": self.code.as_u16().to_string(),
+            "error": self.error,
             "message":self.message,
             "detail":self.detail,
-            "source": match self.source {
-                Some(ref err) => err.to_string(),
-                None => "".into()
-            }
-        })
-        .to_string();
+            "source": self.source
+        });
 
-        write!(f, "{}", json)
+        write!(f, "\n{}", serde_json::to_string_pretty(&json).unwrap())
     }
 }
 
@@ -104,6 +103,12 @@ impl ResponseError for RequestError {
     }
 
     fn error_response(&self) -> HttpResponse {
+        if self.status_code().is_client_error() {
+            warn!("{}", self.to_string());
+        } else if self.status_code().is_server_error() {
+            error!("{}", self.to_string());
+        }
+
         let json = json!({
             "error": self.error,
             "message": self.message,
@@ -116,14 +121,16 @@ impl ResponseError for RequestError {
 
 impl From<mongodb::error::Error> for RequestError {
     fn from(error: mongodb::error::Error) -> Self {
-        error!("{}", error.to_string());
-
         Self {
             code: StatusCode::INTERNAL_SERVER_ERROR,
             error: StatusCode::INTERNAL_SERVER_ERROR.to_string(),
             message: StatusCode::INTERNAL_SERVER_ERROR.to_string(),
             detail: None,
-            source: Some(Box::new(error)),
+            source: if let Some(source) = error.source() {
+                Some(serde_json::Value::String(source.to_string()))
+            } else {
+                None
+            },
         }
     }
 }
@@ -170,6 +177,7 @@ pub enum ErrorCode {
     ResourceNotFound,
     ValidationError,
     InvalidBody,
+    InternalServerError,
 }
 
 impl Into<String> for ErrorCode {
@@ -186,6 +194,7 @@ impl fmt::Display for ErrorCode {
             Self::InvalidQueryParam => "INVALID_QUERY_PARAM",
             Self::ValidationError => "VALIDATION_ERROR",
             Self::InvalidBody => "INVALID_BODY",
+            Self::InternalServerError => "INTERNAL_SERVER_ERROR",
         };
 
         write!(f, "{}", val)

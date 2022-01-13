@@ -1,12 +1,13 @@
-use std::ops::Deref;
+use std::{error::Error, ops::Deref};
 
 use actix_web::http::StatusCode;
 use actix_web::FromRequest;
 use futures::future::{err, ok, Ready};
 use serde::de;
+use serde_json;
 use validator::Validate;
 
-use crate::error::RequestError;
+use crate::{error::RequestError, ErrorCode};
 
 pub struct Query<T: Validate>(pub T);
 
@@ -44,10 +45,14 @@ where
 impl From<serde_urlencoded::de::Error> for RequestError {
     fn from(error: serde_urlencoded::de::Error) -> Self {
         RequestError::builder()
-            .code(StatusCode::BAD_REQUEST)
-            .message("URL Encoding Error")
+            .code(StatusCode::INTERNAL_SERVER_ERROR)
+            .error(ErrorCode::InternalServerError)
+            .message("URL failed to decode")
             .detail(Some(error.to_string().into()))
-            .source(Some(Box::new(error)))
+            .source(match error.source() {
+                Some(source) => Some(serde_json::Value::String(source.to_string())),
+                None => None,
+            })
             .build()
     }
 }
